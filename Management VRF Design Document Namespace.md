@@ -89,7 +89,7 @@ For all packets arriving on management interface, change the destination IP addr
     C12: Create DNAT rule to change destination IP to ip_address2 (ex: for SSH packets with destination port 22): 
          ip netns exec management iptables -t nat -A MgmtVrfChain -p tcp --dport 22 -j DNAT --to-destination 127.100.100.2   
 
-Using these rules, the destination IP is changed to ip_address2 before it is routed by management namespace. Management VRF routing instance routes these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. 
+These rules change the destination IP to ip_address2 before the packets are routed by management namespace. Management VRF routing instance routes these packets via the outport if1. Original destination IP is saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. 
 When user wants to run any new application, a new rule with the appropriate dport should be added similar to the SSH dport 22 used in the above example C12. This solution of adding application specific dport rule is to restrict and accept only the incoming packets for the applications that are supported in SONiC.
 
 **Step2:** 
@@ -98,7 +98,7 @@ After routing, use POST routing SNAT rule to change the source IP address to ip_
     C13: Add a post routing SNAT rule to change Source IP address:
          ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 127.100.100.1:62000-65000
 
-This rule does source NAT for all packets that are routed through if1 and changes the source IP to ip_address1 and source port to a port number between 62000 and 65000. This source port translation is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. After changing the source IP  & source port, packets are sent out of iif1 and received in iif2 by the default namespace. All packets are then routed using the default routing instance. These packets with destination IP ip_address2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
+This rule does source NAT for all packets that are routed through if1 and changes the source IP to ip_address1 and source port to a port number between 62000 and 65000. This source port translation is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. After changing the source IP  & source port, packets are sent out of if1 and received in if2 by the default namespace. All packets are then routed using the default routing instance. These packets with destination IP ip_address2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
 ### OUTGOING PACKET ROUTING
@@ -144,9 +144,11 @@ Implementation of namespace based solution using Linux 4.9 kernel involves the f
 #### Initialization Sequence & Default Behavior
 This section describes the default behavior and configuration of management VRF for static IP and dhcp scenarios. After upgrading to this management VRF supported SONiC image, the binary boots in normal mode with no management VRF created. Customers can either continue to operate in normal mode without any management VRF, or, they can run a config command to enable management VRF. 
 
-    C16: config vrf enable-mgmt-vrf
-    
-This command configures the tag "MANAGEMENT_VRF_CONFIG" in the ConfigDB (given below) and it restarts the "interfaces-config" service. The existing jinja template file "interfaces.j2" is enhanced to check this configuration and create the /etc/network/interfaces file with or without the "eth0" in the configuration. When management VRF is enabled, it does not add the "eth0" interface in this /etc/network/interfaces file. Instead, the service uses a new jinja template file "interfaces_mgmt.j2" and creates a new VRF specific configuration file /etc/network/interfaces.management.
+    C16: config mgmt-vrf enable/disable
+
+This new management VRF specific command is chosen to keep the management vrf configuration independent of data vrf configuration and to avoid the dependencies with data VRF. The alternate option for this CLI command is explained in Appendix. 
+
+This command configures the tag "MGMT_VRF_CONFIG" in the ConfigDB (given below) and it restarts the "interfaces-config" service. The existing jinja template file "interfaces.j2" is enhanced to check this configuration and create the /etc/network/interfaces file with or without the "eth0" in the configuration. When management VRF is enabled, it does not add the "eth0" interface in this /etc/network/interfaces file. Instead, the service uses a new jinja template file "interfaces_mgmt.j2" and creates a new VRF specific configuration file /etc/network/interfaces.management.
 This solution is based on the netns solution proposed at https://github.com/m0kct/debian-netns 
 As specified in the solution, additional scripts are added, viz,  "/etc/network/if-pre-up.d/netns", "/etc/network/if-up.d/netns" and "/etc/network/if-down.d/netns. These scripts use the configuration files and follows the sequence of steps explained in the design section that takes care of the following.
 
@@ -243,33 +245,32 @@ When these applications are triggered from the device, use "ip netns exec manage
 ## Management VRF Configuration
 
 This section explains the new set of configuration required for management VRF.
-ConfigDB schema is enhanced to create a new tag "MANAGEMENT_VRF_CONFIG" where the management VRF specific configuration parameters are stored.
+ConfigDB schema is enhanced to create a new tag "MGMT_VRF_CONFIG" where the management VRF specific configuration parameters are stored.
 
 ### Mangement VRF ConfigDB Schema
 The upgraded config_db.json schema to store the flag for enabling/disabling management VRF is as follows.
 
 ```
-"MANAGEMENT_VRF_CONFIG": {
+"MGMT_VRF_CONFIG": {
     "vrf_global": {
-        "enable_mgmt_vrf": "false" 
-        "mgmt_vrfname": "management"
-     }
+        "mgmtVrfEnabled": "false" 
+    }
 }
 ```
-Default value for "enabled_mgmt_vrf" is "false" and the default value for "mgmt_vrfname" is "management".
-Users shall enable the management VRF by setting the "enable_mgmt_vrf" to "true". Users can also modify the default name for the management VRF.
+Default value for "mgmtVrfEnabled" is "false".
+Users shall enable the management VRF by setting the "mgmtVrfEnabled" to "true". 
+The vrfname for the management VRF is fixed as "mgmt". Users cannot modify this vrfname.
 
 ### Management VRF Config Commands
 Following config command are provided to enable or disable the management VRF and to configure the management vrfname.
 
 ```
-   config vrf enable-mgmt-vrf
-   config vrf disable-mgmt-vrf
-   config vrf mgmt-vrfname <mgmt_vrfname>
+   config mgmt-vrf enable
+   config mgmt-vrf disable
 ```   
-A new module "vrf configuration manager" is added to listen for the configuration changes that happen in ConfigDB for "MANAGEMENT_VRF_CONFIG".
+A new module "vrf configuration manager" is added to listen for the configuration changes that happen in ConfigDB for "MGMT_VRF_CONFIG".
 Its implemented as part of the python script /usr/bin/vrfcfgd.
-This subscribes for the MANAGEMENT_VRF_CONFIG with the ConfigDB and listens for ConfigDB events that are triggered as and when the configuration is modified. 
+This subscribes for the MGMT_VRF_CONFIG with the ConfigDB and listens for ConfigDB events that are triggered as and when the configuration is modified. 
 
 ### Confguring Management Interface Eth0
 
@@ -306,13 +307,13 @@ Example: config managementip add 10.16.206.92/24 10.16.206.1
 
 **Step2**
 Enable management vrf.
-Example: config vrf enable-mgmt-vrf.
+Example: config mgmt-vrf enable
 When management vrf is enabled, the VRF configuration manager "vrfcfgd" module listens for this configuration changes and does the following.
 
 1. If the management vrf is enabled from the default disabled state, it restarts the "config-interfaces" service.
-2. If the management vrf is disabled from the previous enabled state, it first deletes the previous created management namespace and then it restarts the "interfaces-config" service.
+2. If the management vrf is disabled from the previous enabled state, it first deletes the previously created management namespace and then it restarts the "interfaces-config" service.
 
-"interfaces-config" service is enhanced to create the required debian configuration files "/etc/network/interfaces" and '/etc/network/interfaces.management" using the jinja templates. It then restarts the networking service that takes care of bringing up the interfaces in appropriate namespaces. The newly added scripts "/etc/network/if-pre-up.d/netns" and "/etc/netns/if-up.d/netns" takes care of executing the management namespace linux commands and configures the eth0 interface accordingly. In case if management VRF is disabled, all these changes are reverted back to move the eth0 back to default VRF; this is taken care by linux when the management namespace is deleted.
+"interfaces-config" service is enhanced to create the required debian configuration files "/etc/network/interfaces" and '/etc/network/interfaces.management" using the jinja templates. It then restarts the networking service that that brings up the interfaces in appropriate namespaces. The newly added scripts "/etc/network/if-pre-up.d/netns" and "/etc/netns/if-up.d/netns" creates the management namespace using linux commands, moves the eth0 interface to management namespace, creates the veth pair and configures the internal interfaces if1 & if2 with internal IP addresses. "interfaces-config" uses additional script to add the requried iptables rules for SNAT & DNAT. When management VRF is disabled, all the processes running in the management VRF are killed, management namespace is deleted and the configurations done earlier are reverted back. Linux takes care of moving eth0 back to default VRF.
 
 
 ## Appendix
@@ -326,9 +327,21 @@ Understand the current SONiC (Debian) control flow on how the restarting of netw
 
 **Option2: Avoid the usage of /etc/network/interfaces**
 This option is to use “ip netns exec” linux calls instead of following the networking service restart flow. i.e. Modify the existing SONiC control flow and avoid the usage of /etc/network/interfaces and "ifupdown" package to configure the interfaces. Solution is to modify the bootup sequence script “interfaces_config.sh” and make the direct linux shell commands to configure the management VRF and the required DNAT & SNAT rules. Comment out the "systemctl restart networking" so that the control flow that uses the /etc/network/interfaces is avoided. This means that  the existing SONiC solution that is based on /etc/network/interfacecs and networking restart is not used. 
+
 **Disadvantages:** 
 
 1. Current SONiC solution that uses the /etc/network/interfaces and networking restart will be deviating, which is not required in other options
 2. If user explicitly executes the "systemctl restart networking" command directly from linux shell, the  VRF configuration will be lost. This needs further investigation on solving all such cases. 
 
 Due to the reasons given above, the solution given at https://github.com/m0kct/debian-netns is chosen and explained earlier in design section.
+
+### Alternate Implementation Options
+Some of the implementation choices that are considered and dropped are explained here.
+
+As an alternate to the command "config mgmt-vrf enable/disable", it is also possible to enhance the command that is being planned for data vrf implementation https://github.com/Azure/SONiC/pull/242 as follows.
+    
+    C16: Alternate Option: config vrf add/del <VRF-name>
+    Example: config vrf add mgmt
+    
+The fixed VRF-name “mgmt” will be treated as management VRF and any VRF-name not matching "mgmt" will be treated as data VRF-name. This CLI command will create management namespace and add eth0 to it internally. It is not required to use any other commands to enable the management VRF.
+To keep the management vrf configuration independent of data vrf configuration and to avoid the dependencies, the command “config mgmt-vrf enable/disable” is chosen instead of overloading this data VRF config command.
