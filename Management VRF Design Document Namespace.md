@@ -144,7 +144,7 @@ Implementation of namespace based solution using Linux 4.9 kernel involves the f
 #### Initialization Sequence & Default Behavior
 This section describes the default behavior and configuration of management VRF for static IP and dhcp scenarios. After upgrading to this management VRF supported SONiC image, the binary boots in normal mode with no management VRF created. Customers can either continue to operate in normal mode without any management VRF, or, they can run a config command to enable management VRF. 
 
-    C16: config mgmt-vrf enable/disable
+    C17: config mgmt-vrf enable/disable
 
 This new management VRF specific command is chosen to keep the management vrf configuration independent of data vrf configuration and to avoid the dependencies with data VRF. The alternate option for this CLI command is explained in Appendix. 
 
@@ -167,10 +167,12 @@ Following show commands need to be implemented to display the VRF configuration.
 
 | SONiC wrapper command             | Linux command                             | Description
 |---                                |---                                        |---
-| `show mgmt-vrf`                   | `ip netns show`                           | Read & display management VRF configuration
-| `show mgmt-vrf interfaces `       | `ip netns exec management ifconfig'       | Displays VRF detailed info
-| `show mgmt-vrf route`             | `ip netns exec management ip route show`  | Displays the default VRF routes
-| `show vrf address <vrfname>`      | `ip netns exec management ip address show'| Displays IP related info for VRF
+| `show mgmt-vrf`                   | `ip netns show`                           | Display management VRF enabled status and linux namespaces
+| `show mgmt-vrf interfaces `       | `ip netns exec management ifconfig'       | Displays the interfaces present in management VRF
+| `show mgmt-vrf route`             | `ip netns exec management ip route show`  | Displays the routes present in management VRF routing table
+| `show mgmt-vrf addresses`         | `ip netns exec management ip address show'| Displays all IP addresses of interfaces in management VRF
+
+All these show commands are implemented using the linux commands directly without any rendering. This is more like a wrapper for linux commands. Output of these commands will be same as what linux displays.
 
 ### IP Application Design
 This section explains the behavior of each application on the default VRF and management VRF. Application functionality differs based on whether the application is used to connect to the application daemons running in the device or the application is originating from the device.
@@ -189,7 +191,7 @@ TACACS is a library function that is used by applications like SSHD to authentic
 
 If the tacacs server is part of management network, following command should be executed to inform the tacacs module to use the management VRF.
 
-    C17: Configure tacacs to use management VRF to connect to the server
+    C18: Configure tacacs to use management VRF to connect to the server
          config tacacs add --use-mgmt-vrf <tacacs_server_ip>
 
 As part of this enhancement, TACACS module maintains a pool of 10 internal port numbers 62000 to 62009 for configuring upto to 10 tacacs server in the device.
@@ -340,7 +342,7 @@ Some of the implementation choices that are considered and dropped are explained
 
 As an alternate to the command "config mgmt-vrf enable/disable", it is also possible to enhance the command that is being planned for data vrf implementation https://github.com/Azure/SONiC/pull/242 as follows.
     
-    C16: Alternate Option: config vrf add/del <VRF-name>
+    C17: Alternate Option: config vrf add/del <VRF-name>
     Example: config vrf add mgmt
     
 The fixed VRF-name “mgmt” will be treated as management VRF and any VRF-name not matching "mgmt" will be treated as data VRF-name. This CLI command will create management namespace and add eth0 to it internally. It is not required to use any other commands to enable the management VRF.
