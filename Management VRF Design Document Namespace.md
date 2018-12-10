@@ -347,3 +347,105 @@ As an alternate to the command "config mgmt-vrf enable/disable", it is also poss
     
 The fixed VRF-name “mgmt” will be treated as management VRF and any VRF-name not matching "mgmt" will be treated as data VRF-name. This CLI command will create management namespace and add eth0 to it internally. It is not required to use any other commands to enable the management VRF.
 To keep the management vrf configuration independent of data vrf configuration and to avoid the dependencies, the command “config mgmt-vrf enable/disable” is chosen instead of overloading this data VRF config command.
+
+### ACL rules design
+
+ACL rules that are currently installed in SONiC are added based on src-ip. Some of the rules needs to be added in the management namespace, below there are 3 design options suggested. 
+    a. ACL manager to be enhanced for management VRF design. During management VRF enable/disable events ACL manager will
+       install/duplicate the rules from default VRF(NS) to management VRF(NS). Any update/delete to the iptables will be updated
+       accordingly in the management VRF. When management VRF is disabled all rules will be deleted automatically no action is required 
+       by ACL manager.
+  
+       Advantages: All ACL rules are added/deleted/modified at one place by ACL manager and that take cares of adding/deleting/modifying 
+       the rules for management VRF as well.
+       
+       Disadvantages: ACL manager is currently independent of management VRF, by changing the desing it becomes dependent on managment 
+       VRF events.
+    b. Adding a new iptables module to listen to iptables events from kernel and handle the management VRF namespace enable/disable 
+       events and add and delete ip tables in management VRF.
+       
+       Advantages: This module is specific to management VRF and will add ACL rules in management VRF chain.
+       
+       Disadvantages: Needs one more module for managing management VRF iptables events. 
+
+### Show command outputs
+
+    root@sonic:~# show mgmt-vrf
+
+    ManagementVRF : Enabled
+
+    NameSpaces in Linux:
+    mgmt (id: 0)
+    root@sonic:~# show mgmt-vrf interfaces
+
+    Interfaces in Management VRF:
+    eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+            inet 10.16.206.15  netmask 255.255.255.0  broadcast 10.16.206.255
+            inet6 fe80::4e76:25ff:fef4:f9f3  prefixlen 64  scopeid 0x20<link>
+            ether 4c:76:25:f4:f9:f3  txqueuelen 1000  (Ethernet)
+            RX packets 298921  bytes 64239043 (61.2 MiB)
+            RX errors 0  dropped 19685  overruns 0  frame 0
+            TX packets 7816  bytes 673467 (657.6 KiB)
+            TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+            device memory 0xdff40000-dff5ffff
+
+    if1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+            inet 127.100.100.1  netmask 255.255.255.0  broadcast 127.100.100.255
+            inet6 fe80::48f0:27ff:fef7:1e8  prefixlen 64  scopeid 0x20<link>
+            ether 4a:f0:27:f7:01:e8  txqueuelen 1000  (Ethernet)
+            RX packets 4  bytes 520 (520.0 B)
+            RX errors 0  dropped 0  overruns 0  frame 0
+            TX packets 8  bytes 648 (648.0 B)
+            TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+    lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+            inet 127.0.0.1  netmask 255.255.255.0
+            inet6 ::1  prefixlen 128  scopeid 0x10<host>
+            loop  txqueuelen 1  (Local Loopback)
+            RX packets 1  bytes 28 (28.0 B)
+            RX errors 0  dropped 0  overruns 0  frame 0
+            TX packets 1  bytes 28 (28.0 B)
+            TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+            
+    root@sonic:~# show mgmt-vrf route
+
+    Routes in Management VRF Routing Table:
+    10.16.206.0/24 dev eth0 proto kernel scope link src 10.16.206.15
+    127.100.100.0/24 dev if1 proto kernel scope link src 127.100.100.1
+
+    root@sonic:~# show mgmt-vrf addresses
+
+    IP Addresses for interfaces in Management VRF:
+    1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1
+        link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+        inet 127.0.0.1/24 scope host lo
+           valid_lft forever preferred_lft forever
+        inet6 ::1/128 scope host
+           valid_lft forever preferred_lft forever
+    2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+        link/ether 4c:76:25:f4:f9:f3 brd ff:ff:ff:ff:ff:ff
+        inet 10.16.206.15/24 brd 10.16.206.255 scope global eth0
+           valid_lft forever preferred_lft forever
+        inet6 fe80::4e76:25ff:fef4:f9f3/64 scope link
+           valid_lft forever preferred_lft forever
+    78: if1@if79: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+        link/ether 4a:f0:27:f7:01:e8 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+        inet 127.100.100.1/24 brd 127.100.100.255 scope host if1
+           valid_lft forever preferred_lft forever
+        inet6 fe80::48f0:27ff:fef7:1e8/64 scope link
+           valid_lft forever preferred_lft forever
+
+### Design Review Minutes of Meeting 12/06/2018
+Attendees: Guohan, Joe, Marcin, Harish, Kannan, Anand
+
+1. ACL rules - Existing SONiC ACL infra adds ACL ip rules in the default VRF. There are specific source ip based rules which are applicable to management. How is this addressed in the design? Dell will analyze and change the design accordingly to address ACL rules. Different design options for ACL design is mentioned in ACL rules design in Appendix section.
+2. Show commands - The SONiC wrapper show commands displays the output of linux commands. Show command outputs are mentioned above in Appendix section. Dell to work with MSFT to identify what needs to be customized for SONiC show wrapper command output.
+3. Config command to enable/disable VRF - Below capturing the various CLI options that were discussed during the Design Review. MSFT to review the CLI options and suggest which one to implement. Dell to update design document accordingly.
+    
+    a. "config mgmt-vrf enable/disable" - Dropped in order to use the same format as data VRF configuration.
+    b. "config vrf add/del management <vrfname>"
+    c: "config vrf add/del-mgmt-vrf <vrfname>"
+4. Sync up with data VRF team for command schema for management and data VRF since we are going to use command command. Anand to setup meeting with Prince and dell team members.
+5. Managementip config command - combine with hostcfgd to listen to configuration change and take action. hostcfgd is now dependent on mgmt enable/disable. Dell to update design docuement.
+6. L3mdev - alternate solution https://lwn.net/Articles/670190/ - Dell to followup with nikos regarding this.
+
