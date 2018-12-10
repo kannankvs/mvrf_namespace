@@ -350,7 +350,8 @@ To keep the management vrf configuration independent of data vrf configuration a
 
 ### ACL rules design
 
-ACL rules that are currently installed in SONiC are added based on src-ip. Some of the rules needs to be added in the management namespace, below there are 3 design options suggested. 
+ACL rules that are currently installed in SONiC are added based on src-ip. Some of the rules needs to be added in the management namespace, below there are 2 design options suggested. 
+
     a. ACL manager to be enhanced for management VRF design. During management VRF enable/disable events ACL manager will
        install/duplicate the rules from default VRF(NS) to management VRF(NS). Any update/delete to the iptables will be updated
        accordingly in the management VRF. When management VRF is disabled all rules will be deleted automatically no action is required 
@@ -361,6 +362,7 @@ ACL rules that are currently installed in SONiC are added based on src-ip. Some 
        
        Disadvantages: ACL manager is currently independent of management VRF, by changing the desing it becomes dependent on managment 
        VRF events.
+       
     b. Adding a new iptables module to listen to iptables events from kernel and handle the management VRF namespace enable/disable 
        events and add and delete ip tables in management VRF.
        
@@ -443,8 +445,11 @@ Attendees: Guohan, Joe, Marcin, Harish, Kannan, Anand
 3. Config command to enable/disable VRF - Below capturing the various CLI options that were discussed during the Design Review. MSFT to review the CLI options and suggest which one to implement. Dell to update design document accordingly.
     
     a. "config mgmt-vrf enable/disable" - Dropped in order to use the same format as data VRF configuration.
+    
     b. "config vrf add/del management <vrfname>"
+    
     c: "config vrf add/del-mgmt-vrf <vrfname>"
+    
 4. Sync up with data VRF team for command schema for management and data VRF since we are going to use command command. Anand to setup meeting with Prince and dell team members.
 5. Managementip config command - combine with hostcfgd to listen to configuration change and take action. hostcfgd is now dependent on mgmt enable/disable. Dell to update design docuement.
 6. L3mdev - alternate solution https://lwn.net/Articles/670190/ - Dell to followup with nikos regarding this.
