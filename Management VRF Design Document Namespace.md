@@ -448,7 +448,7 @@ Attendees: Guohan, Joe, Marcin, Harish, Kannan, Anand
     
        b. config vrf add/del management <vrfname>
     
-       c. config vrf add/del-mgmt-vrf <vrfname>
+       c. config vrf add/del [--mgmt-vrf] <vrfname>
     
 4. Sync up with data VRF team for command schema for management and data VRF since we are going to use command command. Anand to setup meeting with Prince and dell team members.
 5. Managementip config command - combine with hostcfgd to listen to configuration change and take action. hostcfgd is now dependent on mgmt enable/disable. Dell to update design docuement.
