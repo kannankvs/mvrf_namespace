@@ -444,11 +444,11 @@ Attendees: Guohan, Joe, Marcin, Harish, Kannan, Anand
 2. Show commands - The SONiC wrapper show commands displays the output of linux commands. Show command outputs are mentioned above in Appendix section. Dell to work with MSFT to identify what needs to be customized for SONiC show wrapper command output.
 3. Config command to enable/disable VRF - Below capturing the various CLI options that were discussed during the Design Review. MSFT to review the CLI options and suggest which one to implement. Dell to update design document accordingly.
     
-    a. "config mgmt-vrf enable/disable" - Dropped in order to use the same format as data VRF configuration.
+    a. config mgmt-vrf enable/disable - Dropped in order to use the same format as data VRF configuration.
     
-    b. "config vrf add/del management <vrfname>"
+    b. config vrf add/del management <vrfname>
     
-    c: "config vrf add/del-mgmt-vrf <vrfname>"
+    c: config vrf add/del-mgmt-vrf <vrfname>
     
 4. Sync up with data VRF team for command schema for management and data VRF since we are going to use command command. Anand to setup meeting with Prince and dell team members.
 5. Managementip config command - combine with hostcfgd to listen to configuration change and take action. hostcfgd is now dependent on mgmt enable/disable. Dell to update design docuement.
