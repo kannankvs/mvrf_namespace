@@ -340,13 +340,42 @@ Due to the reasons given above, the solution given at https://github.com/m0kct/d
 ### Alternate Implementation Options
 Some of the implementation choices that are considered and dropped are explained here.
 
-As an alternate to the command "config mgmt-vrf enable/disable", it is also possible to enhance the command that is being planned for data vrf implementation https://github.com/Azure/SONiC/pull/242 as follows.
+As alternate to the command "config mgmt-vrf enable/disable", it is also possible to enhance the command that is being planned for data vrf implementation https://github.com/Azure/SONiC/pull/242 as follows. 
     
-    C17: Alternate Option: config vrf add/del <VRF-name>
-    Example: config vrf add mgmt
+    C17:Option-a: config mgmt-vrf enable/disable
+        Examples: "config vrf add mgmt", "config vrf add management"
+        This option is dropped in order to use the same format as data VRF configuration that uses a different command 
+        syntax given in following options.
     
-The fixed VRF-name “mgmt” will be treated as management VRF and any VRF-name not matching "mgmt" will be treated as data VRF-name. This CLI command will create management namespace and add eth0 to it internally. It is not required to use any other commands to enable the management VRF.
-To keep the management vrf configuration independent of data vrf configuration and to avoid the dependencies, the command “config mgmt-vrf enable/disable” is chosen instead of overloading this data VRF config command.
+    C17:Option-b: config vrf add/del <vrfname>. 
+        In this option, the fixed VRF-name “mgmt” (or "management") will be treated as management VRF and any VRF-name not 
+        matching "mgmt" (and "management") will be treated as data VRF-name.
+        If the vrfname is either "management" or "mgmt", it will enable/disable the management VRF.  
+        Any name other than "mgmt" or "management" will be treated as data VRF.
+        i.e. The vrfname for management VRF is fixed as "mgmt" internally and the CLI users can use the 
+        vrfname as either "management" or "mgmt".
+        This option looks better than the other options.
+       
+    C17:Option-c: config vrf add/del [management] <vrfname> OR config vrf add/del [mgmt] <vrfname>. 
+        Examples: "config vrf add management blue", "config vrf add management management", "config vrf add management mgmt"
+        In this option, the optional keyword "management" or "mgmt" is used to specify that the VRF specified with "vrfname" is
+        a management VRF (not a data VRF). The issue in this is that users are free to specify any vrfname as parameter. 
+        In case if users give similar name as data VRF, it will confuse the users.
+        In the example given, the vrfname "blue" will be treated as management VRF even though the vrfname looks like a data vrfname. 
+        In the other example given, the name "management" is repeated twice (first is the optional keyword and 2nd is the 
+        vrfname specified by user), which is also confusing.
+              
+    C17:Option-d: config vrf add/del [--mgmt-vrf] <vrfname>
+        Examples: "config vrf add --mgmt-vrf red", "config vrf add --mgmt-vrf management", "config vrf add --mgmt-vrf mgmt"
+        This is a slight variation of previous option. Instead of the keyword management/mgmt, this uses "--mgmt-vrf" as optional 
+        parameter to specify that the VRF specified with "vrfname" is a management VRF (not a data VRF). The issue in this is 
+        that users are free to specify any vrfname as parameter. 
+        In case if users give similar name as data VRF, it will confuse the users.
+        In the example given, the vrfname "red" will be treated as management VRF even though the vrfname looks like a data vrfname.
+
+In all these options, its only one CLI command that will create management namespace and add eth0 to it internally. It is not required to use any other commands to attach eth0 to the management VRF.
+
+**CLI Conclusion**: TBD
 
 ### ACL rules design
 
@@ -437,20 +466,18 @@ ACL rules that are currently installed in SONiC are added based on src-ip. Some 
         inet6 fe80::48f0:27ff:fef7:1e8/64 scope link
            valid_lft forever preferred_lft forever
 
-### Design Review Minutes of Meeting 12/06/2018
+### Design Review Minutes of Meeting December 6th 2018
 Attendees: Guohan, Joe, Marcin, Harish, Kannan, Anand
 
 1. ACL rules - Existing SONiC ACL infra adds ACL ip rules in the default VRF. There are specific source ip based rules which are applicable to management. How is this addressed in the design? Dell will analyze and change the design accordingly to address ACL rules. Different design options for ACL design is mentioned in ACL rules design in Appendix section.
+
 2. Show commands - The SONiC wrapper show commands displays the output of linux commands. Show command outputs are mentioned above in Appendix section. Dell to work with MSFT to identify what needs to be customized for SONiC show wrapper command output.
-3. Config command to enable/disable VRF - Below capturing the various CLI options that were discussed during the Design Review. MSFT to review the CLI options and suggest which one to implement. Dell to update design document accordingly.
-    
-       a. config mgmt-vrf enable/disable - Dropped in order to use the same format as data VRF configuration.
-    
-       b. config vrf add/del management <vrfname>
-    
-       c. config vrf add/del [--mgmt-vrf] <vrfname>
+
+3. Config command to enable/disable VRF - Various CLI options that were discussed during the Design Review were given in the above section. MSFT to review the CLI options and suggest which one to implement. Dell to update design document accordingly.
     
 4. Sync up with data VRF team for command schema for management and data VRF since we are going to use command command. Anand to setup meeting with Prince and dell team members.
+
 5. Managementip config command - combine with hostcfgd to listen to configuration change and take action. hostcfgd is now dependent on mgmt enable/disable. Dell to update design docuement.
+
 6. L3mdev - alternate solution https://lwn.net/Articles/670190/ - Dell to followup with nikos regarding this.
 
