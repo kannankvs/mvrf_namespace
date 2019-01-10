@@ -144,9 +144,9 @@ Implementation of namespace based solution using Linux 4.9 kernel involves the f
 #### Initialization Sequence & Default Behavior
 This section describes the default behavior and configuration of management VRF for static IP and dhcp scenarios. After upgrading to this management VRF supported SONiC image, the binary boots in normal mode with no management VRF created. Customers can either continue to operate in normal mode without any management VRF, or, they can run a config command to enable management VRF. 
 
-    C17: config mgmt-vrf enable/disable
+    C17: config vrf add mgmt
 
-This new management VRF specific command is chosen to keep the management vrf configuration independent of data vrf configuration and to avoid the dependencies with data VRF. The alternate option for this CLI command is explained in Appendix. 
+This new management VRF specific command is chosen to keep the management vrf configuration similar of data vrf configuration. The alternate options for this CLI command is explained in Appendix. 
 
 This command configures the tag "MGMT_VRF_CONFIG" in the ConfigDB (given below) and it restarts the "interfaces-config" service. The existing jinja template file "interfaces.j2" is enhanced to check this configuration and create the /etc/network/interfaces file with or without the "eth0" in the configuration. When management VRF is enabled, it does not add the "eth0" interface in this /etc/network/interfaces file. Instead, the service uses a new jinja template file "interfaces_mgmt.j2" and creates a new VRF specific configuration file /etc/network/interfaces.management.
 This solution is based on the netns solution proposed at https://github.com/m0kct/debian-netns 
@@ -223,8 +223,59 @@ Following diagram explains the internal packet flow for the tacacs packets that 
 
 #### SNMP
 The net-snmp daemon runs on the default namespace. SNMP request packets coming from FPP are directly handed over using default namespace. SNMP requests from management interfaces are routed to default namespace using the DNAT & SNAT (and conntrack entries for reply packets) similar to other applications like SSH.
-W.r.t. SNMP traps originated from the device, the design similar to tacacs will be implemented to route them through management namespace.
- 
+
+
+#### SNMPTrap
+SNMP traps originated from the device, the design similar to tacacs will be implemented to route them through management namespace.
+SONiC uses netsnmp agent that runs as a docker service. The SNMP daemon generates traps and sends them to the configured trap server IP address in the /etc/snmp/snmpd.conf inside the docker.
+Config commands support is not available to configure this trap server IP address/port. A new config command (given below) is added to configure the trap server IP address for sending v1 traps, v2 traps v3 traps. Support is provided to configure only one IP address for each SNMP version. If the trap server is reachable through the managment VRF, users should use "--use-mgmt-vrf" option. When user specifies the --use-mgmt-vrf as part of "config snmptrap modify --use-mgmt-vrf <snmp_version> <tacacs_server_ip>" command, this is saved as an additional parameter in the config_db's SNMP_TRAP_CONFIG tag and the snmp service is restarted. This additional parameter is read as part of the startup script /usr/bin/snmp.sh and the required DNAT rules are added to iptables similar to the tacacs solution explained above. 
+If the trap server is part of management network, following command should be executed to inform the netsnmp module to use the management VRF.
+
+    C18: Configure SNMP to use management VRF to send the traps to the server
+         config snmptrap modify [--use-mgmt-vrf] <snmp_version> <snmptrap_server_ip> [snmptrap_server_port]
+         Examples: 
+         config snmptrap modify --use-mgmt-vrf 1 10.11.150.7 (this for sending SNMP version1 traps)
+         config snmptrap modify --use-mgmt-vrf 2 10.11.150.7 (for SNMP v2c)
+         config snmptrap modify --use-mgmt-vrf 3 10.11.150.7 (for SNMP v3)
+          
+By default, no trap server IP address is configured and hence no snmp traps will be sent by default. Users need to use the above commands to configure the SNMP trap server IP addresses. If users do not want to send snmptraps, they can revert back to default using the command "config snmptrap modify --use-mgmt-vrf 2 default (for SNMP v2c)".
+
+As part of this enhancement, SNMP module uses three internal port numbers 62101 (for snmp version1), 62102 (for snmp v2c) and 62103 (for snmp v3). When user configures the snmptrap server IP address using --use-mgmt-vrf and if management VRF is already created, the startup script (/usr/bin/snmp.sh) shall add the DNAT rule similar to the tacacs solution explained earlier. It also updates the sonic snmp configuration file /etc/sonic/snmp.yml with the internal IP address 127.100.100.1 and internal port (62101 for v1, 62102 for v2c and 62103 for v3) in the variable applicable for the particular snmp version that user has configured. Sample configuration that is updated in snmp.yml is given below.
+
+    snmp_rocommunity: public
+    snmp_location: public
+    v1_trap_dest: 20.21.22.23:162
+    v2_trap_dest: default
+    v3_trap_dest: 127.100.100.1:62103 
+
+Startup script then starts the SNMP docker service which in turn uses the snmp internal startup script (file: /usr/bin/start.sh inside snmp docker) that use the snmpd.conf.j2 template file and generates the netsnmp configuration file /etc/snmp/snmpd.conf used by netsnmp.
+Example snmpd.conf is given below.
+
+    #   send SNMPv1  traps
+    trapsink 20.21.22.23:162 public
+    #   send SNMPv2c traps
+    #trap2sink    localhost public
+    #   send SNMPv2c INFORMs
+    informsink 127.100.100.1:62103 public
+
+In this example, v1 trap server is configured without "--use-mgmt-vrf" and hence the snmpd.conf does not use the internal IP address. It uses the actual IP address as it is. In case of v2, user has not configured and hence it uses the default value, which is why the "trap2sink" line in snmpd.conf is commented (dont send v2 traps). In case of v3, it is configured with "--use-mgmt-vrf" and hence the snmpd.conf uses the local IP 127.100.100.1 and local port 62103.
+With this snmp configuration, when netsnmp sends the v3 traps, it will generate an IP packet with destination IP as ip_address1 (127.100.100.1) and destination port as "dp1" (62103).
+This packet is then routed in default namespace context, which results in sending this packet throught the veth pair to management namespace.
+Such packets arriving in if1 will then be processed by management VRF (namespace). Using the PREROUTING rule specified below, DNAT will be applied to change the destination IP to the actual trap server IP address and the destination port to the actual trap server destination port number.
+
+    C12: Create DNAT rule for snmp trap server IP address
+         ip netns exec management iptables -t nat -A PREROUTING -i if1 -p udp --dport 62103 -j DNAT --to-destination <actual_snmptrap_server_ip>:<dport_of_snmptrap_server>
+         Ex: ip netns exec management iptables -t nat -A PREROUTING -i if1 -p udp --dport 62103 -j DNAT --to-destination 10.11.150.7:162
+
+This packet will then be routed using the management routing table in management VRF through the management port.
+When the packet egress out of eth0, POSTROUTING maseuerade rule will be applied to change the source IP address to the eth0's IP address.
+
+    C13: Create SNAT rule for source IP masquerade
+         ip netns exec management iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+With these rules, snmptrap packet is then routed by the management namespace through the management interface eth0. 
+
+
 #### DHCP Client 
 DHCP client is triggered internally as part of restarting the networking service. When management VRF is enabled and if the user has not configured a static IP address for the interface, the script "/etc/if-up.d/netns" takes care of executing "ip netns exec management ifup -i /etc/network/interfaces.management" that triggers the DHCP in the management namespace context. 
 
@@ -267,8 +318,8 @@ The vrfname for the management VRF is fixed as "mgmt". Users cannot modify this 
 Following config command are provided to enable or disable the management VRF and to configure the management vrfname.
 
 ```
-   config mgmt-vrf enable
-   config mgmt-vrf disable
+   config vrf add mgmt
+   config vrf del mgmt
 ```   
 A new module "vrf configuration manager" is added to listen for the configuration changes that happen in ConfigDB for "MGMT_VRF_CONFIG".
 Its implemented as part of the python script /usr/bin/vrfcfgd.
@@ -300,6 +351,27 @@ To configure the management interface IP and the associated default gateway addr
 ```   
 This configuration is independent of the management VRF configuration. 
 
+#### SNMP_TRAP_CONFIG ConfigDB Schema
+The  newly added config_db.json schema for the SNMP_TRAP_CONFIG related attributes is shown below.
+
+```
+    "SNMP_TRAP_CONFIG": {
+        "v1TrapDest": {
+            "DestIp": "10.11.150.7",
+            "DestPort": "162",
+        },
+        "v2TrapDest": {
+            "DestIp": "default",
+            "DestPort": "162"
+        },
+        "v3TrapDest": {
+            "DestIp": "10.11.150.7",
+            "DestPort": "162"
+            "vrf": "mgmt"
+        }
+    }
+```
+
 ### Configuration Sequence
 When user upgrades to the new SONiC software with management VRF support, the images comes up as usual without management VRF enabled. Users shall follow the following steps to enable & use the management VRF.
 
@@ -309,7 +381,7 @@ Example: config managementip add 10.16.206.92/24 10.16.206.1
 
 **Step2**
 Enable management vrf.
-Example: config mgmt-vrf enable
+Example: config vrf add mgmt
 When management vrf is enabled, the VRF configuration manager "vrfcfgd" module listens for this configuration changes and does the following.
 
 1. If the management vrf is enabled from the default disabled state, it restarts the "config-interfaces" service.
@@ -340,7 +412,7 @@ Due to the reasons given above, the solution given at https://github.com/m0kct/d
 ### Alternate Implementation Options
 Some of the implementation choices that are considered and dropped are explained here.
 
-As alternate to the command "config mgmt-vrf enable/disable", it is also possible to enhance the command that is being planned for data vrf implementation https://github.com/Azure/SONiC/pull/242 as follows. 
+As alternate to the command "config vrf add/del mgmt", it is also possible to enhance the command that is being planned for data vrf implementation https://github.com/Azure/SONiC/pull/242 as follows. 
     
     C17:Option-a: config mgmt-vrf enable/disable
         Examples: "config vrf add mgmt", "config vrf add management"
@@ -348,6 +420,7 @@ As alternate to the command "config mgmt-vrf enable/disable", it is also possibl
         syntax given in following options.
     
     C17:Option-b: config vrf add/del <vrfname>. 
+        This command syntax is common for both management VRF and data VRF creation/deletion.
         In this option, the fixed VRF-name “mgmt” (or "management") will be treated as management VRF and any VRF-name not 
         matching "mgmt" (and "management") will be treated as data VRF-name.
         If the vrfname is either "management" or "mgmt", it will enable/disable the management VRF.  
@@ -375,7 +448,7 @@ As alternate to the command "config mgmt-vrf enable/disable", it is also possibl
 
 In all these options, its only one CLI command that will create management namespace and add eth0 to it internally. It is not required to use any other commands to attach eth0 to the management VRF.
 
-**CLI Conclusion**: TBD
+**CLI Conclusion**: C17: Option-b is chosen so that command is in sync with the data vrf command.
 
 ### ACL rules design
 
